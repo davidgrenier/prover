@@ -261,18 +261,10 @@
 	(member? dir '(Q A E))))
 
 (defun path? (path)
-  (if (atom path)
-	't
-	(if (direction? (car path))
-	  (path? (cdr path))
-	  'nil)))
+  (all? direction? path))
 
 (defun quoted-exprs? (args)
-  (if (atom args)
-	't
-	(if (quote? (car args))
-	  (quoted-exprs? (cdr args))
-	  'nil)))
+  (all? quote? args))
 
 (defun step-args? (defs def args)
   (if (dethm? def)
@@ -302,8 +294,154 @@
     'nil))
 
 (defun steps? (defs steps)
-  (if (atom steps)
+  (all? (lambda (step) (step? defs step)) steps))
+
+(defun induction-scheme-for? (def vars e)
+  (if (defun? def)
+    (if (arity? (def.formals def) (app.args e))
+      (if (formals? (app.args e))
+        (subset? (app.args e) vars)
+        'nil)
+      'nil)
+    'nil))
+
+(defun induction-scheme? (defs vars e)
+  (if (app? e)
+    (induction-scheme-for?
+          (lookup (app.name e) defs) vars e)
+    'nil))
+
+(defun seed? (defs def seed)
+  (if (equal seed 'nil)
     't
-    (if (step? defs (car steps))
-      (steps? defs (cdr steps))
+    (if (defun? def)
+      (expr? defs (defun.formals def) seed)
+      (if (dethm? def)
+        (induction-scheme? defs
+                           (dethm.formals def)
+                           seed)
+        'nil))))
+
+(defun extend-rec (defs def)
+  (if (defun? def)
+    (list-extend defs
+                 (defun-c
+                   (defun.name def)
+                   (defun.formals def)
+                   (app-c (defun.name def)
+                          (defun.formals def))))
+    defs))
+
+(defun def-contents? (known-defs formals body)
+  (if (formals? formals)
+    (expr? known-defs formals body)
+    'nil))
+
+(defun def? (known-defs def)
+  (if (dethm? def)
+    (if (undefined? (dethm.name def)
+                    known-defs)
+      (def-contents? known-defs
+                     (dethm.formals def)
+                     (dethm.body def))
+      'nil)
+    (if (defun? def)
+      (if (undefined? (dethm.name def) known-defs)
+        (def-contents? (extend-rec known-defs def)
+                       (defun.formals def)
+                       (defun.body def))
+        'nil)
       'nil)))
+
+(defun defs? (known-defs defs)
+  (if (atom defs)
+    't
+    (if (def? known-defs (car defs))
+      (defs? (list-extend known-defs (car defs)) (cdr defs))
+      'nil)))
+
+(defun list2-or-more? (pf)
+  (if (atom pf)
+    'nil
+    (if (atom (cdr pf))
+      'nil
+      't)))
+
+(defun proof? (defs pf)
+  (if (list2-or-more? pf)
+    (if (def? defs (elem1 pf))
+      (if (seed? defs (elem1 pf) (elem2 pf))
+        (steps? (extend-rec defs (elem1 pf))
+                (cdr (cdr pf)))
+        'nil)
+      'nil)
+    'nil))
+
+(defun proofs? (defs pfs)
+  (if (atom pfs)
+    't
+    (if (proof? defs (car pfs))
+      (proofs?
+        (list-extend defs (elem1 (car pfs)))
+        (cdr pfs))
+      'nil)))
+
+(defun sub-var (vars args var)
+  (if (atom vars)
+    var
+    (if (equal (car vars) var)
+      (car args)
+      (sub-var (cdr vars) (cdr args) var))))
+
+(defun sub-e (vars args e)
+  (if (var? e)
+    (sub-var vars args e)
+    (if (quote? e)
+      e
+      (if (if? e)
+        (QAE-if
+          (sub-es vars args
+                  (if-QAE e)))
+        (app-c (app.name e)
+               (sub-es var args
+                       (app.args e)))))))
+
+(defun sub-es (vars args es)
+  (if (atom es)
+    '()
+    (cons (sub-e vars args (car es))
+          (sub-es vars args (cdr es)))))
+
+(defun exprs-recs (f es)
+  (if (atom es)
+    '()
+    (if (var? (car es))
+      (exprs-recs f (cdr es))
+      (if (quote? (car es))
+        (exprs-recs f (cdr es))
+        (list-union
+          (if (if? (car es))
+            (exprs-recs f (if-QAE (car es)))
+            (if (equal (app.name (car es)) f)
+              (list-union
+                (list1 (car es))
+                (exprs-recs f (app.args (car es))))
+              (exprs-recs f (app.args (car es)))))
+          (exprs-recs f (cdr es)))))))
+
+(defun expr-recs (f e)
+  (exprs-recs f (list1 e)))
+
+(defun totality/< (meas formals app)
+  (app-c '<
+         (list2 (sub-e formals (app.args app) meas)
+                meas)))
+
+(defun totality/meas (meas formals apps)
+  (if (atom apps)
+    '()
+    (cons
+      (totality/< meas formals (car apps))
+      (totality/meas meas formals (cdr apps)))))
+
+
