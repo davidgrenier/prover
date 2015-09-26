@@ -1,0 +1,50 @@
+(include-book "j-bob-lang" :dir :teachpacks)
+
+(include-book "j-bob" :dir :teachpacks)
+
+(include-book "little-prover" :dir :teachpacks)
+
+                   *|(if (atom xs)
+                       (equal (memb? (remb xs)) 'nil)
+                       (if (equal (memb? (remb (cdr xs))) 'nil)
+                           (equal (memb? (remb xs)) 'nil)
+                           't))|*
+                   
+(defun dethm.memb?/remb
+  (J-Bob/define (defun.remb)
+                '(((dethm memb?/remb (xs)
+                          (equal (memb? (remb xs)) 'nil))
+                   (list-induction xs)
+                   ((A 1 1) (remb xs))
+                   ((A 1 1) (if-nest-A (atom xs) '()
+                                       (if (equal (car xs) '?)
+                                           (remb (cdr xs))
+                                           (cons (car xs)
+                                                 (remb (cdr xs))))))
+                   ((A 1) (memb? '()))
+                   ((A 1 Q) (atom '()))
+                   ((A 1) (if-true 'nil (if (equal (car '()) '?)
+                                            't
+                                            (memb? (cdr '())))))
+                   ((E A 1 1) (remb xs))
+                   ((E A 1 1) (if-nest-E '() (if (equal (car xs) '?)
+                                                 (remb (cdr xs))
+                                                 (cons (car xs) (remb (cdr xs))))))
+                   ((E A 1) (if-same (equal (car xs) '?)
+                                     (memb? (if (equal (car xs) '?)
+                                                (remb (cdr xs))
+                                                (cons (car xs) (remb (cdr xs)))))))
+                   ((E A 1 A 1) (if-nest-A (equal (car xs) '?)
+                                           (remb (cdr xs))
+                                           (cons (car xs) (remb (cdr xs)))))
+                   ((E A 1 E 1) (if-nest-E (equal (car xs) '?)
+                                           (remb (cdr xs))
+                                           (cons (car xs) (remb (cdr xs)))))
+                   *|(if (atom xs)
+                       't
+                       (if (equal (memb? (remb (cdr xs))) 'nil)
+                           (if (equal (car xs) '?)
+                               (memb? (remb (cdr xs)))
+                               (memb? (cons (car xs) (remb (cdr xs)))))
+                           't))|*
+                   ))))
