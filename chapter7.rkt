@@ -130,7 +130,7 @@
                    (() (if-same (atom x) 't))))))
 
 (defun dethm.ctx?/sub ()
-  (J-Bob/define (ctx?/t)
+  (J-Bob/define (dethm.ctx?/t)
                 '(((dethm ctx?/sub (x y)
                           (if (ctx? x)
                               (if (ctx? y)
@@ -297,4 +297,8 @@
                                                 't
                                                 (ctx? (cdr y)))))
                     ((A E E E Q) (if-nest-E (ctx? (car y)) 't (ctx? (cdr y))))
-                    
+                    ((A E E E) (if-nest-E (ctx? (cdr y)) (equal (ctx? sub x y) 't) 't))
+                    ((A E E) (if-same (ctx? (cdr y)) 't))
+                    ((A E) (if-same (ctx? (car y)) 't))
+                    ((A) (if-same (atom y) 't))
+                    (() (if-same (ctx? x) 't))))))
