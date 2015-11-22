@@ -92,9 +92,9 @@
     (list3? (untag x))
     'nil))
 
-(defun.name (def) (elem1 (untag def)))
-(defun.formals (def) (elem2 (untag def)))
-(defun.body (def) (elem3 (untag def)))
+(defun defun.name (def) (elem1 (untag def)))
+(defun defun.formals (def) (elem2 (untag def)))
+(defun defun.body (def) (elem3 (untag def)))
 
 (defun dethm-c (name formals body)
   (tag 'dethm (list3 name formals body)))
@@ -288,4 +288,594 @@
 (defun quoted-exprs? (args)
   (all? quote? args))
 
+(defun step-args? (defs def args)
+  (if (dethm? def)
+    (if (arity? (dethm.formals def) args)
+      (exprs? defs 'any args)
+      'nil)
+    (if (defun? def)
+      (if (arity? (defun.formals def) args)
+        (exprs? defs 'any args)
+        'nil)
+      (if (rator? def)
+        (if (arity? (rator.formals def) args)
+          (quoted-exprs? args)
+          'nil)
+        'nil))))
 
+(defun step-app? (defs app)
+  (step-args? defs
+              (lookup (app.name app) defs)
+              (app.args app)))
+
+(defun step? (defs step)
+  (if (path? (elem1 step))
+    (if (app? (elem2 step))
+      (step-app? defs (elem2 step))
+      'nil)
+    'nil))
+
+(defun steps? (defs steps)
+  (all? (lambda (step) (step? defs step))))
+
+(defun induction-scheme-for? (def vars e)
+  (if (defun? def)
+    (if (arity? (defun.formals def) (app.args e))
+      (if (formals? (app.args e))
+        (subset? (app.args e) vars)
+        'nil)
+      'nil)
+    'nil))
+
+(defun induction-scheme? (defs vars e)
+  (if (app? e)
+    (induction-scheme-for?
+      (lookup (app.name e) defs)
+      vars
+      e)
+    'nil))
+
+(defun seed? (defs def seed)
+  (if (equal seed 'nil)
+    't
+    (if (defun? def)
+      (expr? defs (defun.formals def) seed)
+      (if (dethm? def)
+        (induction-scheme? defs
+                           (dethm.formals def)
+                           seed)
+        'nil))))
+
+(defun extend-rec (defs def)
+  (if (defun? def)
+    (defun-c
+      (defun.name def)
+      (defun.formals def)
+      (app-c (defun.name def)
+             (defun.formals def)))
+    defs))
+
+(defun def-contents? (known-defs formals body)
+    (if (formals? formals)
+      (expr? known-defs formals body)
+      'nil))
+
+(defun def? (known-defs def)
+  (if (dethm? def)
+    (if (undefined? (dethm.name def)
+                    known-defs)
+      (def-contents? known-defs
+                     (dethm.formals def)
+                     (dethm.body def))
+      'nil)
+    (if (defun? def)
+      (if (undefined? (defun.name def)
+                      known-defs)
+        (def-contents?
+          (extend-rec known-defs def)
+          (defun.formals def)
+          (defun.body def))
+        'nil)
+      'nil)))
+
+(defun defs? (known-defs defs)
+  (if (atom defs)
+    't
+    (if (def? known-defs (car defs))
+      (defs? (list-extend known-defs (car defs)) (cdr defs))
+      'nil)))
+
+(defun list2-or-more? (pf)
+  (if (atom pf)
+    'nil
+    (if (atom (cdr pf))
+      'nil
+      't)))
+
+(defun proof? (defs pf)
+  (if (list2-or-more? pf)
+    (if (def? defs (elem1 pf))
+      (if (seed? defs (elem1 pf) (elem2 pf))
+        (steps? (extend-rec defs (elem1 pf))
+                (cdr (cdr pf)))
+        'nil)
+      'nil)
+    'nil))
+
+(defun proofs? (defs pfs)
+  (if (atom pfs)
+    't
+    (if (proof? defs (car pfs))
+      (proofs?
+        (list-extend defs (elem1 (car pfs)))
+        (cdr pfs))
+      'nil)))
+
+(defun sub-var (vars args var)
+  (if (atom vars)
+    var
+    (if (equal (car vars) var)
+      (car args)
+      (sub-var (cdr vars) (cdr args) var))))
+
+(defun sub-es (vars args es)
+  (if (atom es)
+    '()
+    (if (var? (car es))
+      (cons (sub-var vars args (car es))
+            (sub-es vars args (cdr es)))
+      (if (quote? (car es))
+        (cons (car es)
+              (sub-es vars args (cdr es)))
+        (if (if? (car es))
+          (cons
+            (QAE-if
+              (sub-es vars args (if-QAE (car es))))
+            (sub-es vars args (cdr es)))
+          (cons
+            (app-c (app.name (car es))
+                   (sub-es vars args (app.args (car es))))
+            (sub-es vars args (cdr es))))))))
+
+(defun sub-e (vars args e)
+  (elem1 (sub-es vars args (list1 e))))
+
+(defun exprs-recs (f es)
+  (if (atom es)
+    '()
+    (if (var? (car es))
+      (exprs-recs f (cdr es))
+      (if (quote? (car es))
+        (exprs-recs f (cdr es))
+        (if (if? (car es))
+          (list-union
+            (exprs-recs f (if-QAE (car es)))
+            (exprs-recs f (cdr es)))
+          (if (equal (app.name (car es)) f)
+            (list-union
+              (list1 (car es))
+              (list-union
+                (exprs-recs f (app.args (car es)))
+                (exprs-recs f (cdr es))))
+            (list-union
+              (exprs-recs f (app.args (car es)))
+              (exprs-recs f (cdr es)))))))))
+
+(defun expr-recs (f e)
+  (exprs-recs f (list1 e)))
+
+(defun totality/< (meas formals app)
+  (app-c '<
+         (list2 (sub-e formals (app.args app) meas)
+                meas)))
+
+(defun totality/meas (meas formals apps)
+  (if (atom apps)
+    '()
+    (cons
+      (totality/< meas formals (car apps))
+      (totality/meas meas formals (cdr apps)))))
+
+(defun totality/if (meas f formals e)
+  (if (if? e)
+    (conjunction
+      (list-extend
+        (totality/meas meas formals
+                       (expr-recs f (if.Q e)))
+        (if-c-when-necessary (if.Q e)
+                             (totality/if meas f formals
+                                          (if.A e))
+                             (totality/if meas f formals
+                                          (if.E e)))))
+    (conjunction
+      (totality/meas meas formals
+                     (expr-recs f e)))))
+
+(defun totality/claim (meas def)
+  (if (equal meas 'nil)
+    (if (equal (expr-recs (defun.name def))
+               (defun.body def))
+      (quote-c 't)
+      (quote-c 'nil))
+    (if-c
+      (app-c 'natp (list1 meas))
+      (totality/if meas (defun.name def)
+                   (defun.formals def)
+                   (defun.body def))
+      (quote-c 'nil))))
+
+(defun induction/prems (vars claim apps)
+  (if (atom apps)
+    '()
+    (cons
+      (sub-e vars (app.args (car apps)) claim)
+      (induction/prems vars claim (cdr apps)))))
+
+(defun induction/if (vars claim f e)
+  (if (if? e)
+    (implication
+      (induction/prems vars claim
+                       (expr-recs f (if.Q e)))
+      (if-c-when-necessary (if.Q e)
+                           (induction/if vars claim f (if.A e))
+                           (induction/if vars claim f (if.E e))))
+    (implication
+      (induction/prems vars claim (expr-recs f e))
+      claim)))
+
+(defun induction/defun (vars claim def)
+  (induction/if vars claim (defun.name def)
+                (sub-e (defun.formals def) vars)
+                (defun.body def)))
+
+(defun induction/claim (defs seed def)
+  (if (equal seed 'nil)
+    (dethm.body def)
+    (induction/defun (app.args seed)
+                     (dethm.body def)
+                     (lookup (app.name seed) defs))))
+
+(defun find-focus-at-direction (dir e)
+  (if (equal dir 'Q)
+    (if.Q e)
+    (if (equal dir 'A)
+      (if.A e)
+      (if (equal dir 'E)
+        (if.E e)
+        (get-arg dir (app.args e))))))
+
+(defun rewrite-focus-at-direction (dir e1 e2)
+  (if (equal dir 'Q)
+    (if-c e2 (if.A e1) (if.E e1))
+    (if (equal dir 'A)
+      (if-c (if.Q e1) e2 (if.E e1))
+      (if (equal dir 'E)
+        (if-c (if.Q e1) (if.A e1) e2)
+        (app-c (app.name e1)
+               (set-arg dir (app.args e1) e2))))))
+
+(defun focus-is-at-direction? (dir e)
+  (if (equal dir 'Q)
+    (if? e)
+    (if (equal dir 'A)
+      (if? e)
+      (if (equal dir 'E)
+        (if? e)
+        (if (app? e)
+          (<=len dir (app.args e))
+          'nil)))))
+
+(defun focus-is-at-path? (path e)
+  (if (atom path)
+    't
+    (if (focus-is-at-direction? (car path) e)
+      (focus-is-at-path? (cdr path)
+                         (find-focus-at-direction (car path) e))
+      'nil)))
+
+(defun find-focus-at-path (path e)
+  (if (atom path)
+    e
+    (find-focus-at-path (cdr path)
+                        (find-focus-at-direction (car path) e))))
+
+(defun rewrite-focus-at-path (path e1 e2)
+  (if (atom path)
+    e2
+    (rewrite-focus-at-direction (car path) e1
+                                (rewrite-focus-at-path (cdr path)
+                                                       (find-focus-at-direction (car path) e1)
+                                                       e2))))
+
+(defun prem-X? (X prem path e)
+  (if (atom path)
+    'nil
+    (if (equal (car path) X)
+      (if (equal (if.Q e) prem)
+        't
+        (prem-X? X prem (cdr path)
+                 (find-focus-at-direction (car path) e)))
+      (prem-X? X prem (cdr path)
+               (find-focus-at-direction (car path) e)))))
+
+(defun prem-A? (prem path e)
+  (prem-X? 'A prem path e))
+
+(defun prem-E? (prem path e)
+  (prem-X? 'E prem path e))
+
+(defun follow-prems (path e thm)
+  (if (if? thm)
+    (if (prem-A? (if.Q thm) path e)
+      (follow-prems path e (if.A thm))
+      (if (prem-E? (if.Q thm) path e)
+        (follow-prems path e (if.E thm))
+        thm))
+    thm))
+
+(defun unary-op (rator rand)
+  (if (equal rator 'atom)
+    (atom rand)
+    (if (equal rator 'car)
+      (car rand)
+      (if (equal rator 'cdr)
+        (cdr rand)
+        (if (equal rator 'natp)
+          (natp rand)
+          (if (equal rator 'size)
+            (size rand)
+            'nil))))))
+
+(defun binary-op (rator rand1 rand2)
+  (if (equal rator 'equal)
+    (equal rand1 rand2)
+    (if (equal rator 'cons)
+      (cons rand1 rand2)
+      (if (equal rator '+)
+        (+ rand1 rand2)
+        (if (equal rator '<)
+          (< rand1 rand2)
+          'nil)))))
+
+(defun apply-op (rator rands)
+  (if (member? rator '(atom car cdr natp size))
+    (unary-op rator (elem1 rands))
+    (if (member? rator '(equal cons + <))
+      (binary-op rator (elem1 rands) (elem2 rands))
+      'nil)))
+
+(defun rands (args)
+  (if (atom args)
+    '()
+    (cons (quote.value (car args))
+          (rands (cdr args)))))
+
+(defun eval-op (app)
+  (quote-c
+    (apply-op (app.name app)
+              (rands (app.args app)))))
+
+(defun app-of-equal? (e)
+  (if (app? e)
+    (equal (app.name e) 'equal)
+    'nil))
+
+(defun equality (focus a b)
+  (if (equal focus a)
+    b
+    (if (equal focus b)
+      a
+      focus)))
+
+(defun equality/equation (focus concl-inst)
+  (if (app-of-equal? concl-inst)
+    (equality focus
+              (elem1 (app.args concl-inst))
+              (elem2 (app.args concl-inst)))
+    focus))
+
+(defun equality/path (e path thm)
+  (if (focus-is-at-path? path e)
+    (rewrite-focus-at-path path e
+                           (equality/equation
+                             (find-focus-at-path path e)
+                             (follow-prems path e thm)))
+    e))
+
+(defun equality/def (claim path app def)
+  (if (rator? def)
+    (equality/path claim path
+                   (app-c 'equal (list2 app (eval-op app))))
+    (if (defun? def)
+      (equality/path claim path
+                     (sub-e (defun.formals def)
+                            (app.args app)
+                            (list2
+                              (app-c (defun.name def)
+                                     (defun.formals def))
+                              (defun.body def))))
+      (if (dethm? def)
+        (equality/path claim path
+                       (sub-e (dethm.formals def)
+                              (app.args app)
+                              (dethm.body def)))
+        claim))))
+
+(defun rewrite/step (defs claim step)
+  (equality/def claim (elem1 step) (elem2 step)
+                (lookup (app.name (elem2 step)) defs)))
+
+(defun rewrite/continue (defs steps old new)
+  (if (equal new old)
+    new
+    (if (atom steps)
+      new
+      (rewrite/continue defs (cdr steps) new
+                        (rewrite/step defs new (car steps))))))
+
+(defun rewrite/steps (defs claim steps)
+  (if (atom steps)
+    claim
+    (rewrite/continue defs (cdr steps) claim
+                      (rewrite/step defs claim (car steps)))))
+
+(defun rewrite/prove (defs def seed steps)
+  (if (defun? def)
+    (rewrite/steps defs
+                   (totality/claim seed def)
+                   steps)
+    (if (dethm? def)
+      (rewrite/steps defs
+                     (induction/claim defs seed def)
+                     steps)
+      (quote-c 'nil))))
+
+(defun rewrite/prove+1 (defs pf e)
+  (if (equal e (quote-c 't))
+    (rewrite/prove defs (elem1 pf) (elem2 pf)
+                   (cdr (cdr pf)))
+    e))
+
+(defun rewrite/prove+ (defs pfs)
+  (if (atom pfs)
+    (quote-c 't)
+    (rewrite/prove+1 defs (car pfs)
+                     (rewrite/prove+
+                       (list-extend defs (elem1 (car pfs)))
+                       (cdr pfs)))))
+
+(defun rewrite/define (defs def seed steps)
+  (if (equal (rewrite/prove defs def seed steps)
+             (quote-c 't))
+    (list-extend defs def)
+    defs))
+
+(defun rewrite/define+1 (defs1 defs2 pfs)
+  (if (equal defs1 defs2)
+    defs1
+    (if (atom pfs)
+      defs2
+      (rewrite/define+1 defs2
+                        (rewrite/define defs2
+                                        (elem1 (car pfs))
+                                        (elem2 (car pfs))
+                                        (cdr (cdr (car pfs))))
+                        (cdr pfs)))))
+
+(defun rewrite/define+ (defs pfs)
+  (if (atom pfs)
+    defs
+    (rewrite/define+1 defs
+                      (rewrite/define defs
+                                      (elem1 (car pfs))
+                                      (elem2 (car pfs))
+                                      (cdr (cdr (car pfs))))
+                      (cdr pfs))))
+
+(defun J-Bob/step (defs e steps)
+  (if (defs? '() defs)
+    (if (expr? defs 'any e)
+      (if (steps? defs steps)
+        (rewrite/steps defs e steps)
+        e)
+      e)
+    e))
+
+(defun J-Bob/prove (defs pfs)
+  (if (defs? '() defs)
+    (if (proofs? defs pfs)
+      (rewrite/prove+ defs pfs)
+      (quote-c 'nil))
+    (quote-c 'nil)))
+
+(defun J-Bob/define (defs pfs)
+  (if (defs? '() defs)
+    (if (proofs? defs pfs)
+      (rewrite/define+ defs pfs)
+      defs)
+    defs))
+
+(defun axioms ()
+  '((dethm atom/cons (x y)
+           (equal (atom (cons x y)) 'nil))
+    (dethm car/cons (x y)
+           (equal (car (cons x y)) x))
+    (dethm cdr/cons (x y)
+           (equal (cdr (cons x y)) y))
+    (dethm equal-same (x)
+           (equal (equal x x) 't))
+    (dethm equal-swap (x y)
+           (equal (equal x y) (equal y x)))
+    (dethm if-same (x y)
+           (equal (if x y y) y))
+    (dethm if-true (x y)
+           (equal (if 't x y) x))
+    (dethm if-false (x y)
+           (equal (if 'nil x y) y))
+    (dethm if-nest-E (x y z)
+           (if x 't (equal (if x y z) z)))
+    (dethm if-nest-A (x y z)
+           (if x (equal (if x y z) y) 't))
+    (dethm cons/car+cdr (x)
+           (if (atom x)
+             't
+             (equal (cons (car x) (cdr x)) x)))
+    (dethm equal-if (x y)
+           (if (equal x y) (equal x y) 't))
+    (dethm natp/size (x)
+           (equal (natp (size x)) 't))
+    (dethm size/car (x)
+           (if (atom x)
+             't
+             (equal (< (size (car x)) (size x)) 't)))
+    (dethm size/cdr (x)
+           (if (atom x)
+             't
+             (equal (< (size (cdr x)) (size x)) 't)))
+    (dethm associate-+ (a b c)
+           (equal (+ (+ a b) c) (+ a (+ b c))))
+    (dethm commute-+ (x y)
+           (equal (+ x y) (+ y x)))
+    (dethm natp/+ (x y)
+           (if (natp x)
+             (if (natp y)
+               (equal (natp (+ x y)) 't)
+               't)
+             't))
+    (dethm positives-+ (x y)
+           (if (< '0 x)
+             (if (< '0 y)
+               (equal (< '0 (+ x y)) 't)
+               't)
+             't))
+    (dethm common-addends-< (x y z)
+           (equal (< (+ x z) (+ y z)) (< x y)))
+    (dethm identity-+ (x)
+           (if (natp x)
+             (equal (+ '0 x) x)
+             't))))
+
+(defun prelude ()
+  (J-Bob/define (axioms)
+                '(((defun list-induction (x)
+                     (if (atom x)
+                       '()
+                       (cons (car x)
+                             (list-induction (cdr x)))))
+                   (size x)
+                   ((A E) (size/cdr x))
+                   ((A) (if-same (atom x) 't))
+                   ((Q) (natp-size x))
+                   (() (if-true 't 'nil)))
+                  ((defun star-induction (x)
+                     (if (atom x)
+                       x
+                       (cons (star-induction (car x))
+                             (star-induction (cdr x)))))
+                   (size x)
+                   ((A E A) (size/cdr x))
+                   ((A E Q) (size/car x))
+                   ((A E) (if-true 't 'nil))
+                   ((A) (if-same (atom x) 't))
+                   ((Q) (natp/size x))
+                   (() (if-true 't nil))))))
