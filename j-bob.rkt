@@ -32,12 +32,20 @@
     (equal (car x) sym)))
 (defun untag (x) (cdr x))
 
+(defun all? (predicate xs)
+  (if (atom xs)
+    't
+    (if (predicate (car xs))
+      (all? predicate (cdr xs))
+      'nil)))
+
 (defun member? (x ys)
-  (if (atom ys)
+  (if (all? (lambda (e)
+              (if (equal x e)
+                'nil
+                't)) ys)
     'nil
-    (if (equal (car ys) x)
-      't
-      (member? x (cdr ys)))))
+    't))
 
 (defun quote-c (value)
   (tag 'quote (list1 value)))
@@ -131,13 +139,6 @@
       (dethm.name def)
       def)))
 
-(defun def.formals (def)
-  (if (dethm? def)
-    (dethm.formals def)
-    (if (defun? def)
-      (defun.formals def)
-      '())))
-
 (defun if-c-when-necessary (Q A E)
   (if (equal A E) A (if-c Q A E)))
 
@@ -191,13 +192,6 @@
 (defun bound? (var vars)
   (if (equal vars 'any) 't (member? var vars)))
 
-(defun all? (predicate xs)
-  (if (atom xs)
-    't
-    (if (predicate (car xs))
-      (all? predicate (cdr xs))
-      'nil)))
-
 (defun expr? (defs vars e)
   (if (var? e)
     (bound? e vars)
@@ -215,11 +209,7 @@
   (all? (lambda (e) (expr? defs vars e)) es))
 
 (defun subset? (xs ys)
-  (if (atom xs)
-    't
-    (if (member? (car xs) ys)
-      (subset? (cdr xs) ys)
-      'nil)))
+  (all? (lambda (x) (member? x ys))))
 
 (defun list-extend (xs x)
   (if (atom xs)
@@ -232,8 +222,7 @@
 (defun list-union (xs ys)
   (if (atom ys)
     xs
-    (list-union (list-extend xs (car ys))
-                (cdr ys))))
+    (list-union (list-extend xs (car ys)) (cdr ys))))
 
 (defun get-arg-from (n args from)
   (if (atom args)
